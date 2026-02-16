@@ -178,19 +178,43 @@ export class PresetLoader {
     /**
      * Get info about all available libraries (synchronous).
      * Requires loadRootIndex() to have been called first.
+     *
+     * If the root index contains sub-index entries, those are returned as libraries.
+     * If the root index contains only preset entries (flat index), a single
+     * virtual library is created from the root index itself.
      */
     getAvailableLibraries(): LibraryInfo[] {
         if (!this.rootIndex) return [];
-        return this.rootIndex.entries
-            .filter((e): e is SubIndexEntry => e.type === 'index')
-            .map(entry => ({
-                name: entry.name,
-                path: entry.path,
-                description: entry.description,
-                presetCount: entry.presetCount,
-                loaded: this.loadedLibraries.has(entry.name),
-                enabled: this.enabledLibraries.has(entry.name),
-            }));
+
+        const subIndexes = this.rootIndex.entries.filter(
+            (e): e is SubIndexEntry => e.type === 'index'
+        );
+
+        // Flat index — presets are directly in the root, no sub-libraries
+        if (subIndexes.length === 0) {
+            const presetCount = this.rootIndex.entries.filter(e => e.type === 'preset').length;
+            if (presetCount > 0) {
+                const name = this.rootIndex.name;
+                return [{
+                    name,
+                    path: 'index.json',
+                    description: this.rootIndex.description,
+                    presetCount,
+                    loaded: this.loadedLibraries.has(name),
+                    enabled: this.enabledLibraries.has(name),
+                }];
+            }
+            return [];
+        }
+
+        return subIndexes.map(entry => ({
+            name: entry.name,
+            path: entry.path,
+            description: entry.description,
+            presetCount: entry.presetCount,
+            loaded: this.loadedLibraries.has(entry.name),
+            enabled: this.enabledLibraries.has(entry.name),
+        }));
     }
 
     /** Load a specific library index by name */
@@ -200,6 +224,16 @@ export class PresetLoader {
         }
 
         const root = await this.loadRootIndex();
+
+        // Check if this is a flat index (root index IS the library)
+        const hasSubIndexes = root.entries.some(e => e.type === 'index');
+        if (!hasSubIndexes && root.name === name) {
+            // Flat index: treat root index as the library itself
+            const loaded: LoadedLibrary = { index: root, baseUrl: this.baseUrl };
+            this.loadedLibraries.set(name, loaded);
+            return loaded;
+        }
+
         const libEntry = root.entries.find(
             (e): e is SubIndexEntry => e.type === 'index' && e.name === name
         );
@@ -375,7 +409,9 @@ export class PresetLoader {
     /** Find which loaded library contains a given entry. */
     findLibraryForEntry(entry: PresetEntry): string | undefined {
         for (const [libraryName, { index }] of this.loadedLibraries) {
-            if (index.entries.some(e => e === entry)) {
+            if (index.entries.some(e =>
+                e.type === 'preset' && e.name === entry.name && e.path === entry.path
+            )) {
                 return libraryName;
             }
         }
