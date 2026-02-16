@@ -1,6 +1,6 @@
 {
     "name": "songwalker-js",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "SongWalker music programming library - audio player and preset loader",
     "type": "module",
     "main": "./dist/index.js",

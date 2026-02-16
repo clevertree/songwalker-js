@@ -59,6 +59,7 @@ export class SongPlayer {
 
     /** Compile, render, and play the song from source code.
      *  If presetsJson is provided, sampler presets will be used for rendering.
+     *  Throws a descriptive Error if WASM rendering fails.
      */
     async playSource(source: string, presetsJson?: string): Promise<void> {
         this.stop();
@@ -78,9 +79,18 @@ export class SongPlayer {
         }
 
         // Render audio via Rust DSP engine — with or without presets
-        const samples = presetsJson
-            ? render_song_samples_with_presets(source, this.SAMPLE_RATE, presetsJson)
-            : render_song_samples(source, this.SAMPLE_RATE);
+        let samples: Float32Array;
+        try {
+            samples = presetsJson
+                ? render_song_samples_with_presets(source, this.SAMPLE_RATE, presetsJson)
+                : render_song_samples(source, this.SAMPLE_RATE);
+        } catch (err) {
+            // Re-throw with context so callers get a meaningful message
+            if (err instanceof WebAssembly.CompileError || err instanceof WebAssembly.RuntimeError) {
+                throw new Error(`WASM engine error: ${err.message}. The WASM module may not be loaded correctly.`);
+            }
+            throw err;
+        }
         this.renderedSamples = samples;
         if (samples.length === 0) {
             this.emitState();
@@ -130,9 +140,17 @@ export class SongPlayer {
 
     /** Export the current song as a WAV file download. */
     exportWav(source: string, filename = 'song.wav', presetsJson?: string): void {
-        const wavBytes = presetsJson
-            ? render_song_wav_with_presets(source, this.SAMPLE_RATE, presetsJson)
-            : render_song_wav(source, this.SAMPLE_RATE);
+        let wavBytes: Uint8Array;
+        try {
+            wavBytes = presetsJson
+                ? render_song_wav_with_presets(source, this.SAMPLE_RATE, presetsJson)
+                : render_song_wav(source, this.SAMPLE_RATE);
+        } catch (err) {
+            if (err instanceof WebAssembly.CompileError || err instanceof WebAssembly.RuntimeError) {
+                throw new Error(`WASM engine error: ${err.message}. The WASM module may not be loaded correctly.`);
+            }
+            throw err;
+        }
         const blob = new Blob([new Uint8Array(wavBytes)], { type: 'audio/wav' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');

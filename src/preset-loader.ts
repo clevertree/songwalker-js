@@ -217,7 +217,10 @@ export class PresetLoader {
         }));
     }
 
-    /** Load a specific library index by name */
+    /** Load a specific library index by name.
+     *  Matches by exact name first, then by normalized name (underscores ↔ spaces),
+     *  then by directory prefix in the path.
+     */
     async loadLibrary(name: string): Promise<LoadedLibrary> {
         if (this.loadedLibraries.has(name)) {
             return this.loadedLibraries.get(name)!;
@@ -234,9 +237,28 @@ export class PresetLoader {
             return loaded;
         }
 
-        const libEntry = root.entries.find(
+        // Try exact match first
+        let libEntry = root.entries.find(
             (e): e is SubIndexEntry => e.type === 'index' && e.name === name
         );
+
+        // Fall back: normalize underscores ↔ spaces for matching
+        if (!libEntry) {
+            const normalized = name.replace(/_/g, ' ');
+            libEntry = root.entries.find(
+                (e): e is SubIndexEntry => e.type === 'index' &&
+                    e.name.replace(/_/g, ' ').toLowerCase() === normalized.toLowerCase()
+            );
+        }
+
+        // Fall back: match by directory prefix in path (e.g. "FluidR3_GM/index.json")
+        if (!libEntry) {
+            libEntry = root.entries.find(
+                (e): e is SubIndexEntry => e.type === 'index' &&
+                    e.path.startsWith(name + '/')
+            );
+        }
+
         if (!libEntry) {
             throw new Error(`Library not found: "${name}"`);
         }
@@ -250,7 +272,11 @@ export class PresetLoader {
         const baseUrl = dirOf(libUrl);
 
         const loaded: LoadedLibrary = { index, baseUrl };
+        // Store under both the requested name and the canonical name from the index
         this.loadedLibraries.set(name, loaded);
+        if (libEntry.name !== name) {
+            this.loadedLibraries.set(libEntry.name, loaded);
+        }
         return loaded;
     }
 
@@ -358,6 +384,21 @@ export class PresetLoader {
      * the library is loaded automatically if needed.
      */
     async loadPreset(name: string): Promise<PresetDescriptor> {
+        const result = await this.loadPresetWithContext(name);
+        return result.preset;
+    }
+
+    /**
+     * Load a preset by name and return the preset, its resolved URL, the matching
+     * entry, and the library name — so callers can resolve relative audio paths
+     * without duplicating search logic.
+     */
+    async loadPresetWithContext(name: string): Promise<{
+        preset: PresetDescriptor;
+        presetUrl: string;
+        entry: PresetEntry;
+        libraryName: string | undefined;
+    }> {
         // Check for library prefix: "LibraryName/PresetName"
         const slashIdx = name.indexOf('/');
         if (slashIdx > 0) {
@@ -371,7 +412,11 @@ export class PresetLoader {
 
             const results = this.search({ name: presetName, library: libName });
             if (results.length > 0) {
-                return this._loadPresetEntry(results[0], libName);
+                const entry = results[0];
+                const libraryName = libName;
+                const presetUrl = this.resolvePresetUrl(entry.path, libraryName);
+                const preset = await this._fetchPreset(presetUrl, entry.path);
+                return { preset, presetUrl, entry, libraryName };
             }
         }
 
@@ -380,7 +425,11 @@ export class PresetLoader {
         if (results.length === 0) {
             throw new Error(`Preset not found: "${name}"`);
         }
-        return this._loadPresetEntry(results[0]);
+        const entry = results[0];
+        const libraryName = this.findLibraryForEntry(entry);
+        const presetUrl = this.resolvePresetUrl(entry.path, libraryName);
+        const preset = await this._fetchPreset(presetUrl, entry.path);
+        return { preset, presetUrl, entry, libraryName };
     }
 
     /** Load a preset by its catalog path, resolved relative to a library. */
@@ -461,9 +510,14 @@ export class PresetLoader {
 
         switch (ref_.type) {
             case 'external': {
+                // Preset files may use either 'path' or 'url' for the sample location
+                const filePath = ref_.path ?? ref_.url;
+                if (!filePath) {
+                    throw new Error('External audio reference has neither path nor url');
+                }
                 const sampleUrl = presetUrl
-                    ? `${dirOf(presetUrl)}/${ref_.path}`
-                    : `${this.baseUrl}/${ref_.path}`;
+                    ? `${dirOf(presetUrl)}/${filePath}`
+                    : `${this.baseUrl}/${filePath}`;
                 cacheKey = ref_.sha256 ?? sampleUrl;
 
                 if (this.audioCache.has(cacheKey)) {

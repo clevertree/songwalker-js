@@ -69,6 +69,8 @@ export interface SampleZone {
     audio: AudioReference;
     sampleRate: number;
     loopPoints?: LoopPoints;
+    /** Alias used in preset.json files on disk */
+    loop?: LoopPoints;
 }
 
 export interface KeyRange {
@@ -92,7 +94,7 @@ export interface LoopPoints {
 }
 
 export type AudioReference =
-    | { type: 'external'; path: string; sha256?: string }
+    | { type: 'external'; path?: string; url?: string; sha256?: string; codec?: AudioCodec }
     | { type: 'contentAddressed'; sha256: string; codec: AudioCodec }
     | { type: 'inlineFile'; data: string; codec: AudioCodec }       // base64
     | { type: 'inlinePcm'; data: string; sampleRate: number };      // base64
