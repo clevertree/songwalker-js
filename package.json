@@ -1,0 +1,52 @@
+{
+    "name": "songwalker-js",
+    "version": "0.1.0",
+    "description": "SongWalker music programming library - audio player and preset loader",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "import": "./dist/index.js",
+            "types": "./dist/index.d.ts"
+        },
+        "./monaco": {
+            "import": "./dist/monaco.js",
+            "types": "./dist/monaco.d.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsc && cp -r src/wasm dist/",
+        "prepublishOnly": "npm run build"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/clevertree/songwalker-js"
+    },
+    "keywords": [
+        "music",
+        "audio",
+        "daw",
+        "webassembly",
+        "midi",
+        "synthesizer",
+        "sampler"
+    ],
+    "author": "Ari Asulin",
+    "license": "MIT",
+    "devDependencies": {
+        "monaco-editor": "^0.55.1",
+        "typescript": "^5.7.0"
+    },
+    "peerDependencies": {
+        "monaco-editor": "^0.55.0"
+    },
+    "peerDependenciesMeta": {
+        "monaco-editor": {
+            "optional": true
+        }
+    }
+}

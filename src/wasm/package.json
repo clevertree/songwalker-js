@@ -1,0 +1,15 @@
+{
+  "name": "songwalker_core",
+  "type": "module",
+  "version": "0.1.1",
+  "files": [
+    "songwalker_core_bg.wasm",
+    "songwalker_core.js",
+    "songwalker_core.d.ts"
+  ],
+  "main": "songwalker_core.js",
+  "types": "songwalker_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
