@@ -21,6 +21,8 @@ import type {
     IndexEntry,
 } from './preset-types.js';
 
+import { unzipSync } from 'fflate';
+
 // Re-export types for convenience
 export type {
     PresetDescriptor,
@@ -117,6 +119,13 @@ export interface LoadedLibrary {
     baseUrl: string;
 }
 
+/** Info about a loaded sub-index (e.g., a game within a library) */
+export interface LoadedSubIndex {
+    index: PresetIndex;
+    baseUrl: string;
+    libraryName: string;
+}
+
 export class PresetLoader {
     private readonly baseUrl: string;
 
@@ -129,19 +138,26 @@ export class PresetLoader {
     /** Which libraries are enabled for search */
     private enabledLibraries: Set<string> = new Set();
 
+    /** Loaded sub-indexes within libraries (e.g., games), keyed by "libraryName/subIndexName" */
+    private loadedSubIndexes: Map<string, LoadedSubIndex> = new Map();
+
     /** LRU cache for preset descriptors */
     private presetCache: LRUCache<string, PresetDescriptor>;
 
     /** LRU cache for decoded AudioBuffers */
     private audioCache: LRUCache<string, AudioBuffer>;
 
+    /** Cache for fetched+unzipped archives: url → { entry path → bytes } */
+    private archiveCache: LRUCache<string, Map<string, Uint8Array>>;
+
     /** AudioContext for decoding audio */
     private _audioContext: AudioContext | null = null;
 
-    constructor(baseUrl: string, options?: { presetCacheSize?: number; audioCacheSize?: number }) {
+    constructor(baseUrl: string, options?: { presetCacheSize?: number; audioCacheSize?: number; archiveCacheSize?: number }) {
         this.baseUrl = baseUrl.replace(/\/$/, ''); // trim trailing slash
         this.presetCache = new LRUCache(options?.presetCacheSize ?? 128);
         this.audioCache = new LRUCache(options?.audioCacheSize ?? 256);
+        this.archiveCache = new LRUCache(options?.archiveCacheSize ?? 32);
     }
 
     /** Set the AudioContext used for decoding audio samples. */
@@ -296,17 +312,119 @@ export class PresetLoader {
         return Array.from(this.enabledLibraries);
     }
 
+    // ── Sub-Index (Nested Libraries) ─────────────────────
+
+    /**
+     * Check whether a loaded library contains sub-indexes (nested indexes)
+     * rather than direct presets.
+     */
+    libraryHasSubIndexes(libraryName: string): boolean {
+        const lib = this.loadedLibraries.get(libraryName);
+        if (!lib) return false;
+        return lib.index.entries.some(e => e.type === 'index');
+    }
+
+    /**
+     * Get sub-index entries for a library (e.g., game titles within a library).
+     * Returns empty array if the library isn't loaded or has no sub-indexes.
+     */
+    getSubIndexes(libraryName: string): SubIndexEntry[] {
+        const lib = this.loadedLibraries.get(libraryName);
+        if (!lib) return [];
+        return lib.index.entries.filter(
+            (e): e is SubIndexEntry => e.type === 'index'
+        );
+    }
+
+    /**
+     * Load a sub-index (e.g., a game's instrument index) within a library.
+     * Returns the loaded sub-index with its presets.
+     */
+    async loadSubIndex(libraryName: string, subIndexName: string): Promise<LoadedSubIndex> {
+        const key = `${libraryName}/${subIndexName}`;
+        if (this.loadedSubIndexes.has(key)) {
+            return this.loadedSubIndexes.get(key)!;
+        }
+
+        const lib = this.loadedLibraries.get(libraryName);
+        if (!lib) {
+            throw new Error(`Library not loaded: "${libraryName}"`);
+        }
+
+        // Find the sub-index entry
+        let subEntry = lib.index.entries.find(
+            (e): e is SubIndexEntry => e.type === 'index' && e.name === subIndexName
+        );
+
+        // Fuzzy match: normalize underscores/spaces
+        if (!subEntry) {
+            const normalized = subIndexName.replace(/_/g, ' ').toLowerCase();
+            subEntry = lib.index.entries.find(
+                (e): e is SubIndexEntry => e.type === 'index' &&
+                    e.name.replace(/_/g, ' ').toLowerCase() === normalized
+            );
+        }
+
+        if (!subEntry) {
+            throw new Error(`Sub-index "${subIndexName}" not found in library "${libraryName}"`);
+        }
+
+        const subUrl = `${lib.baseUrl}/${subEntry.path}`;
+        const resp = await fetch(subUrl);
+        if (!resp.ok) {
+            throw new Error(`Failed to fetch sub-index: ${resp.status} ${subUrl}`);
+        }
+        const index = await resp.json() as PresetIndex;
+        const baseUrl = dirOf(subUrl);
+
+        const loaded: LoadedSubIndex = { index, baseUrl, libraryName };
+        this.loadedSubIndexes.set(key, loaded);
+        return loaded;
+    }
+
+    /**
+     * Check whether a sub-index has been loaded.
+     */
+    isSubIndexLoaded(libraryName: string, subIndexName: string): boolean {
+        return this.loadedSubIndexes.has(`${libraryName}/${subIndexName}`);
+    }
+
+    /**
+     * Get presets from a loaded sub-index.
+     */
+    getSubIndexPresets(libraryName: string, subIndexName: string): PresetEntry[] {
+        const key = `${libraryName}/${subIndexName}`;
+        const sub = this.loadedSubIndexes.get(key);
+        if (!sub) return [];
+        return sub.index.entries.filter(
+            (e): e is PresetEntry => e.type === 'preset'
+        );
+    }
+
     // ── Search ───────────────────────────────────────────
 
-    /** Get all presets from enabled libraries. */
-    private _getEnabledPresets(): { libraryName: string; entry: PresetEntry }[] {
-        const results: { libraryName: string; entry: PresetEntry }[] = [];
+    /** Get all presets from enabled libraries (including loaded sub-indexes). */
+    private _getEnabledPresets(): { libraryName: string; entry: PresetEntry; subIndexName?: string }[] {
+        const results: { libraryName: string; entry: PresetEntry; subIndexName?: string }[] = [];
         for (const libraryName of this.enabledLibraries) {
             const lib = this.loadedLibraries.get(libraryName);
             if (!lib) continue;
+
+            // Direct presets in the library
             for (const entry of lib.index.entries) {
                 if (entry.type === 'preset') {
                     results.push({ libraryName, entry });
+                }
+            }
+
+            // Presets from loaded sub-indexes within this library
+            for (const [key, sub] of this.loadedSubIndexes) {
+                if (sub.libraryName !== libraryName) continue;
+                for (const entry of sub.index.entries) {
+                    if (entry.type === 'preset') {
+                        const subIndexName = key.substring(libraryName.length + 1);
+                        results.push({ libraryName, entry, subIndexName });
+                    }
                 }
             }
         }
@@ -414,8 +532,8 @@ export class PresetLoader {
             if (results.length > 0) {
                 const entry = results[0];
                 const libraryName = libName;
-                const presetUrl = this.resolvePresetUrl(entry.path, libraryName);
-                const preset = await this._fetchPreset(presetUrl, entry.path);
+                const presetUrl = this.resolvePresetUrl(entry.path, libraryName, entry);
+                const preset = await this._fetchPreset(presetUrl, presetUrl);
                 return { preset, presetUrl, entry, libraryName };
             }
         }
@@ -427,8 +545,8 @@ export class PresetLoader {
         }
         const entry = results[0];
         const libraryName = this.findLibraryForEntry(entry);
-        const presetUrl = this.resolvePresetUrl(entry.path, libraryName);
-        const preset = await this._fetchPreset(presetUrl, entry.path);
+        const presetUrl = this.resolvePresetUrl(entry.path, libraryName, entry);
+        const preset = await this._fetchPreset(presetUrl, presetUrl);
         return { preset, presetUrl, entry, libraryName };
     }
 
@@ -451,25 +569,66 @@ export class PresetLoader {
     private async _loadPresetEntry(entry: PresetEntry, libraryHint?: string): Promise<PresetDescriptor> {
         // Find which library this entry belongs to
         const libraryName = libraryHint ?? this.findLibraryForEntry(entry);
-        const fullUrl = this.resolvePresetUrl(entry.path, libraryName);
-        return this._fetchPreset(fullUrl, entry.path);
+        const fullUrl = this.resolvePresetUrl(entry.path, libraryName, entry);
+        return this._fetchPreset(fullUrl, fullUrl);
     }
 
-    /** Find which loaded library contains a given entry. */
+    /** Find which loaded library (or sub-index) contains a given entry.
+     *  Uses object identity (===) to avoid false matches when multiple
+     *  sub-indexes contain entries with the same name/path. */
     findLibraryForEntry(entry: PresetEntry): string | undefined {
+        // Check direct library entries first
         for (const [libraryName, { index }] of this.loadedLibraries) {
-            if (index.entries.some(e =>
-                e.type === 'preset' && e.name === entry.name && e.path === entry.path
-            )) {
+            if (index.entries.some(e => e === entry)) {
                 return libraryName;
+            }
+        }
+        // Check loaded sub-indexes
+        for (const [, sub] of this.loadedSubIndexes) {
+            if (sub.index.entries.some(e => e === entry)) {
+                return sub.libraryName;
             }
         }
         return undefined;
     }
 
-    /** Resolve a preset path to a full URL using the library's base URL. */
-    resolvePresetUrl(path: string, libraryName?: string): string {
+    /**
+     * Find the sub-index key ("libraryName/subIndexName") that contains an entry.
+     * Uses object identity (===).
+     */
+    findSubIndexForEntry(entry: PresetEntry): string | undefined {
+        for (const [key, sub] of this.loadedSubIndexes) {
+            if (sub.index.entries.some(e => e === entry)) {
+                return key;
+            }
+        }
+        return undefined;
+    }
+
+    /** Resolve a preset path to a full URL.
+     *  Uses object identity to find the correct sub-index base URL. */
+    resolvePresetUrl(path: string, libraryName?: string, entry?: PresetEntry): string {
+        // If we have the actual entry object, use identity to find its sub-index
+        if (entry) {
+            for (const [, sub] of this.loadedSubIndexes) {
+                if (sub.index.entries.some(e => e === entry)) {
+                    return `${sub.baseUrl}/${path}`;
+                }
+            }
+        }
         if (libraryName) {
+            // Check sub-indexes (only when no entry ref — less reliable)
+            if (!entry) {
+                for (const [key, sub] of this.loadedSubIndexes) {
+                    if (sub.libraryName !== libraryName) continue;
+                    if (sub.index.entries.some(e =>
+                        e.type === 'preset' && e.path === path
+                    )) {
+                        return `${sub.baseUrl}/${path}`;
+                    }
+                }
+            }
+            // Fall back to library base URL
             const lib = this.loadedLibraries.get(libraryName);
             if (lib) {
                 return `${lib.baseUrl}/${path}`;
@@ -573,6 +732,31 @@ export class PresetLoader {
                 this.audioCache.set(cacheKey, pcmBuffer);
                 return pcmBuffer;
             }
+
+            case 'archive': {
+                // Resolve archive ZIP URL relative to preset location
+                const archiveUrl = presetUrl
+                    ? `${dirOf(presetUrl)}/${ref_.archive}`
+                    : `${this.baseUrl}/${ref_.archive}`;
+                cacheKey = `archive:${archiveUrl}:${ref_.entry}`;
+                if (this.audioCache.has(cacheKey)) {
+                    return this.audioCache.get(cacheKey)!;
+                }
+
+                // Fetch and unzip archive (cached per URL)
+                const entries = await this.fetchArchive(archiveUrl);
+                const entryData = entries.get(ref_.entry);
+                if (!entryData) {
+                    throw new Error(
+                        `Entry "${ref_.entry}" not found in archive ${archiveUrl}`
+                    );
+                }
+                arrayBuffer = entryData.buffer.slice(
+                    entryData.byteOffset,
+                    entryData.byteOffset + entryData.byteLength,
+                ) as ArrayBuffer;
+                break;
+            }
         }
 
         const decoded = await ctx.decodeAudioData(arrayBuffer);
@@ -598,11 +782,39 @@ export class PresetLoader {
         return result;
     }
 
+    // ── Archive Support ──────────────────────────────────
+
+    /**
+     * Fetch a ZIP archive and return its entries as a Map.
+     * Results are cached so each archive is fetched only once.
+     */
+    private async fetchArchive(url: string): Promise<Map<string, Uint8Array>> {
+        if (this.archiveCache.has(url)) {
+            return this.archiveCache.get(url)!;
+        }
+
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            throw new Error(`Failed to fetch archive: ${resp.status} ${url}`);
+        }
+        const zipData = new Uint8Array(await resp.arrayBuffer());
+        const unzipped = unzipSync(zipData);
+
+        const entries = new Map<string, Uint8Array>();
+        for (const [path, data] of Object.entries(unzipped)) {
+            entries.set(path, data);
+        }
+
+        this.archiveCache.set(url, entries);
+        return entries;
+    }
+
     // ── Cache Management ─────────────────────────────────
 
     clearCaches(): void {
         this.presetCache.clear();
         this.audioCache.clear();
+        this.archiveCache.clear();
     }
 
     get presetCacheSize(): number {
@@ -652,7 +864,7 @@ export class PresetLoader {
                     const entry = this.search({ name })[0];
                     if (entry) {
                         const libraryName = this.findLibraryForEntry(entry);
-                        const presetUrl = this.resolvePresetUrl(entry.path, libraryName);
+                        const presetUrl = this.resolvePresetUrl(entry.path, libraryName, entry);
                         await this.decodeSamplerZones(
                             preset.node.config as SamplerConfig,
                             presetUrl,

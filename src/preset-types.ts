@@ -97,7 +97,8 @@ export type AudioReference =
     | { type: 'external'; path?: string; url?: string; sha256?: string; codec?: AudioCodec }
     | { type: 'contentAddressed'; sha256: string; codec: AudioCodec }
     | { type: 'inlineFile'; data: string; codec: AudioCodec }       // base64
-    | { type: 'inlinePcm'; data: string; sampleRate: number };      // base64
+    | { type: 'inlinePcm'; data: string; sampleRate: number }       // base64
+    | { type: 'archive'; archive: string; entry: string; codec?: AudioCodec };  // ZIP archive
 
 export type AudioCodec = 'wav' | 'mp3' | 'ogg' | 'flac';
 
@@ -150,6 +151,14 @@ export interface SubIndexEntry {
     path: string;              // Relative path to sub-index.json
     description?: string;
     presetCount?: number;
+    /** Number of instruments / presets in this sub-index (alias for presetCount) */
+    instrumentCount?: number;
+    /** Whether this sub-index contains drum-kit presets */
+    hasDrumKit?: boolean;
+    /** Tags describing the contents */
+    tags?: string[];
+    /** Song names associated with this sub-index (e.g., SNES game songs) */
+    songs?: string[];
 }
 
 // ── Legacy compat alias (to be removed) ──────────────────

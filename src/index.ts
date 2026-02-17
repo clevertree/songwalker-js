@@ -35,12 +35,16 @@ export type {
 export {
     PresetLoader,
     type LoadedLibrary,
+    type LoadedSubIndex,
     type SearchOptions,
     type LibraryInfo,
 } from './preset-loader.js';
 
 // ── Preset Browser UI ────────────────────────────────────
 export { PresetBrowser } from './preset-browser.js';
+
+// ── Fullscreen ───────────────────────────────────────────
+export { setupFullscreen } from './fullscreen.js';
 
 // ── Player ───────────────────────────────────────────────
 export {
