@@ -39,6 +39,9 @@ export {
     type LibraryInfo,
 } from './preset-loader.js';
 
+// ── Preset Browser UI ────────────────────────────────────
+export { PresetBrowser } from './preset-browser.js';
+
 // ── Player ───────────────────────────────────────────────
 export {
     SongPlayer,
