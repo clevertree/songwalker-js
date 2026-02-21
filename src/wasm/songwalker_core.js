@@ -34,6 +34,67 @@ export function core_version() {
 }
 
 /**
+ * WASM-exposed: query the compilation state at a given cursor byte offset.
+ *
+ * Returns a JSON object with the active instrument, BPM, tuning, note length,
+ * track name, and beat position at the cursor. Used by the editor to determine
+ * which instrument to preview when a piano key is pressed.
+ * @param {string} source
+ * @param {number} cursor_byte_offset
+ * @returns {any}
+ */
+export function get_instrument_at_cursor(source, cursor_byte_offset) {
+    const ptr0 = passStringToWasm0(source, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.get_instrument_at_cursor(ptr0, len0, cursor_byte_offset);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * WASM-exposed: render a single note to mono f32 PCM samples.
+ *
+ * Used by the piano keyboard to preview notes with the instrument active
+ * at the cursor. Constructs a minimal EventList, renders through the
+ * AudioEngine with `EndMode::Release`, and caps at 4 seconds.
+ *
+ * * `pitch` — note name (e.g. "C4", "A3")
+ * * `velocity` — note velocity 0–127
+ * * `gate_beats` — audible note duration in beats
+ * * `bpm` — tempo for beat→seconds conversion
+ * * `tuning_pitch` — A4 reference frequency (e.g. 440.0)
+ * * `sample_rate` — output sample rate
+ * * `instrument_json` — `InstrumentConfig` serialized as JSON
+ * * `presets_json` — optional JSON array of loaded preset data (pass "[]" if none)
+ * @param {string} pitch
+ * @param {number} velocity
+ * @param {number} gate_beats
+ * @param {number} bpm
+ * @param {number} tuning_pitch
+ * @param {number} sample_rate
+ * @param {string} instrument_json
+ * @param {string} presets_json
+ * @returns {Float32Array}
+ */
+export function render_single_note(pitch, velocity, gate_beats, bpm, tuning_pitch, sample_rate, instrument_json, presets_json) {
+    const ptr0 = passStringToWasm0(pitch, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(instrument_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(presets_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.render_single_note(ptr0, len0, velocity, gate_beats, bpm, tuning_pitch, sample_rate, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v4;
+}
+
+/**
  * WASM-exposed: compile and render `.sw` source to mono f32 samples.
  * Returns the raw audio buffer for AudioWorklet playback.
  * @param {string} source

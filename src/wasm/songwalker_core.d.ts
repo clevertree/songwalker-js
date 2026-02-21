@@ -13,6 +13,33 @@ export function compile_song(source: string): any;
 export function core_version(): string;
 
 /**
+ * WASM-exposed: query the compilation state at a given cursor byte offset.
+ *
+ * Returns a JSON object with the active instrument, BPM, tuning, note length,
+ * track name, and beat position at the cursor. Used by the editor to determine
+ * which instrument to preview when a piano key is pressed.
+ */
+export function get_instrument_at_cursor(source: string, cursor_byte_offset: number): any;
+
+/**
+ * WASM-exposed: render a single note to mono f32 PCM samples.
+ *
+ * Used by the piano keyboard to preview notes with the instrument active
+ * at the cursor. Constructs a minimal EventList, renders through the
+ * AudioEngine with `EndMode::Release`, and caps at 4 seconds.
+ *
+ * * `pitch` — note name (e.g. "C4", "A3")
+ * * `velocity` — note velocity 0–127
+ * * `gate_beats` — audible note duration in beats
+ * * `bpm` — tempo for beat→seconds conversion
+ * * `tuning_pitch` — A4 reference frequency (e.g. 440.0)
+ * * `sample_rate` — output sample rate
+ * * `instrument_json` — `InstrumentConfig` serialized as JSON
+ * * `presets_json` — optional JSON array of loaded preset data (pass "[]" if none)
+ */
+export function render_single_note(pitch: string, velocity: number, gate_beats: number, bpm: number, tuning_pitch: number, sample_rate: number, instrument_json: string, presets_json: string): Float32Array;
+
+/**
  * WASM-exposed: compile and render `.sw` source to mono f32 samples.
  * Returns the raw audio buffer for AudioWorklet playback.
  */
@@ -44,6 +71,8 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly compile_song: (a: number, b: number) => [number, number, number];
     readonly core_version: () => [number, number];
+    readonly get_instrument_at_cursor: (a: number, b: number, c: number) => [number, number, number];
+    readonly render_single_note: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly render_song_samples: (a: number, b: number, c: number) => [number, number, number, number];
     readonly render_song_samples_with_presets: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly render_song_wav: (a: number, b: number, c: number) => [number, number, number, number];

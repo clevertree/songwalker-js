@@ -177,8 +177,10 @@ export class PresetLoader {
         if (this.rootIndex) return this.rootIndex;
 
         const url = `${this.baseUrl}/index.json`;
+        console.log(`[PresetLoader] Loading root index: ${url}`);
         const resp = await fetch(url);
         if (!resp.ok) {
+            console.error(`[PresetLoader] Root index fetch failed (${resp.status}): ${url}`);
             throw new Error(`Failed to fetch root index: ${resp.status} ${url}`);
         }
         this.rootIndex = await resp.json() as PresetIndex;
@@ -280,11 +282,14 @@ export class PresetLoader {
         }
 
         const libUrl = `${this.baseUrl}/${libEntry.path}`;
+        console.log(`[PresetLoader] Loading library: ${name} [${libUrl}]`);
         const resp = await fetch(libUrl);
         if (!resp.ok) {
+            console.error(`[PresetLoader] Library fetch failed (${resp.status}): ${libUrl}`);
             throw new Error(`Failed to fetch library index: ${resp.status} ${libUrl}`);
         }
         const index = await resp.json() as PresetIndex;
+        console.log(`[PresetLoader] Loaded library: ${name} with ${index.entries?.[0]?.entries?.length || 0} presets`);
         const baseUrl = dirOf(libUrl);
 
         const loaded: LoadedLibrary = { index, baseUrl };
@@ -683,9 +688,14 @@ export class PresetLoader {
                     return this.audioCache.get(cacheKey)!;
                 }
 
+                console.log(`[PresetLoader] Fetching sample: ${sampleUrl}`);
                 const resp = await fetch(sampleUrl);
-                if (!resp.ok) throw new Error(`Failed to fetch sample: ${resp.status} ${sampleUrl}`);
+                if (!resp.ok) {
+                    console.error(`[PresetLoader] Sample fetch failed (${resp.status}): ${sampleUrl}`);
+                    throw new Error(`Failed to fetch sample: ${resp.status} ${sampleUrl}`);
+                }
                 arrayBuffer = await resp.arrayBuffer();
+                console.log(`[PresetLoader] Fetched sample: ${sampleUrl} [${arrayBuffer.byteLength} bytes]`);
                 break;
             }
 
@@ -694,10 +704,15 @@ export class PresetLoader {
                 if (this.audioCache.has(cacheKey)) {
                     return this.audioCache.get(cacheKey)!;
                 }
-                const shaUrl = `${this.baseUrl}/samples/${ref_.sha256}.${ref_.codec}`;
-                const resp = await fetch(shaUrl);
-                if (!resp.ok) throw new Error(`Failed to fetch sample: ${resp.status} ${shaUrl}`);
+                const sampleUrl = `${this.baseUrl}/samples/${ref_.sha256}.${ref_.codec}`;
+                console.log(`[PresetLoader] Fetching content-addressed sample: ${sampleUrl}`);
+                const resp = await fetch(sampleUrl);
+                if (!resp.ok) {
+                    console.error(`[PresetLoader] Content-addressed sample fetch failed (${resp.status}): ${sampleUrl}`);
+                    throw new Error(`Failed to fetch sample: ${resp.status} ${sampleUrl}`);
+                }
                 arrayBuffer = await resp.arrayBuffer();
+                console.log(`[PresetLoader] Fetched content-addressed sample: ${sampleUrl} [${arrayBuffer.byteLength} bytes]`);
                 break;
             }
 

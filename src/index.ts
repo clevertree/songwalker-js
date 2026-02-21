@@ -61,6 +61,8 @@ export {
     render_song_samples_with_presets,
     render_song_wav,
     render_song_wav_with_presets,
+    render_single_note,
+    get_instrument_at_cursor,
     initSync,
     default as initWasm,
 } from './wasm/songwalker_core.js';

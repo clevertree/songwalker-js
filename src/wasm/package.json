@@ -1,15 +1,29 @@
 {
   "name": "songwalker_core",
   "type": "module",
+  "description": "Core library for the SongWalker music programming language — lexer, parser, compiler, DSP engine, and WASM bindings",
   "version": "0.1.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clevertree/songwalker-core"
+  },
   "files": [
     "songwalker_core_bg.wasm",
     "songwalker_core.js",
     "songwalker_core.d.ts"
   ],
   "main": "songwalker_core.js",
+  "homepage": "https://songwalker.net",
   "types": "songwalker_core.d.ts",
   "sideEffects": [
     "./snippets/*"
+  ],
+  "keywords": [
+    "music",
+    "synthesizer",
+    "dsp",
+    "chiptune",
+    "wasm"
   ]
 }

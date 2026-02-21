@@ -6,7 +6,13 @@
  * Routes through an AnalyserNode for real-time visualisation.
  */
 
-import { render_song_samples, render_song_samples_with_presets, render_song_wav, render_song_wav_with_presets } from './wasm/songwalker_core.js';
+import {
+    render_song_samples,
+    render_song_samples_with_presets,
+    render_song_wav,
+    render_song_wav_with_presets,
+    render_single_note,
+} from './wasm/songwalker_core.js';
 
 // ── Player State ───────────────────────────────────────────
 
@@ -183,6 +189,47 @@ export class SongPlayer {
 
     get currentTotalBeats(): number {
         return this.totalBeats;
+    }
+
+    /** Play a single preview note using the WASM engine. */
+    async playNote(pitch: string, velocity: number, instrumentJson: string, presetsJson?: string): Promise<void> {
+        if (!this.ctx) {
+            this.ctx = new AudioContext({ sampleRate: this.SAMPLE_RATE });
+            this.analyser = this.ctx.createAnalyser();
+            this.analyser.fftSize = 2048;
+            this.gainNode = this.ctx.createGain();
+            this.gainNode.connect(this.analyser);
+            this.analyser.connect(this.ctx.destination);
+        }
+        if (this.ctx.state === 'suspended') {
+            await this.ctx.resume();
+        }
+
+        console.log(`[SongPlayer] Rendering preview: ${pitch} @ vel=${velocity}`);
+        const samples = render_single_note(
+            pitch,
+            velocity,
+            0.5, // gate duration in beats
+            this.bpm,
+            440.0,
+            this.SAMPLE_RATE,
+            instrumentJson,
+            presetsJson || "[]"
+        );
+
+        if (samples.length === 0) {
+            console.warn(`[SongPlayer] Rendered 0 samples for preview: ${pitch}`);
+            return;
+        }
+
+        console.log(`[SongPlayer] Playing preview: ${samples.length} samples (${(samples.length / this.SAMPLE_RATE).toFixed(2)}s)`);
+        const buffer = this.ctx.createBuffer(1, samples.length, this.SAMPLE_RATE);
+        buffer.getChannelData(0).set(samples);
+
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.gainNode!);
+        source.start();
     }
 
     private extractMetadata(source: string): void {
